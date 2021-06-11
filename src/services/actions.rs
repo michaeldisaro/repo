@@ -1,9 +1,10 @@
 use crate::models::structs::RepositoryItem;
+use crate::traits::string_traits::*;
 use std::collections::HashMap;
 use std::fs;
 use std::os::unix;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{exit, Command};
 
 const MODULES_FOLDER: &str = "node_modules";
 const TAB: &str = "   ";
@@ -42,6 +43,18 @@ pub fn copy(project: &String, root_path: &PathBuf) {
     println!("Project: {}", project);
     println!("-------------------------------------------------\n");
     copy_packages(root_path, project, &mapped_repository);
+}
+
+pub fn update(project: &String, root_path: &PathBuf) {
+    let projects = get_projects(root_path);
+    let mapped_repository = map_modules(root_path, projects);
+
+    println!("\n-------------------------------------------------");
+    println!("Updating repository to latest minor release...");
+    println!("Path: {}", root_path.display().to_string());
+    println!("Project: {}", project);
+    println!("-------------------------------------------------\n");
+    update_dependencies(root_path, project, &mapped_repository);
 }
 
 fn map_modules(path: &PathBuf, projects: Vec<String>) -> HashMap<String, RepositoryItem> {
@@ -144,6 +157,107 @@ fn copy_packages(
     recurse_packages(&root_path, &project, &mapped_repo, 0, &copy);
 }
 
+fn update_dependencies(
+    root_path: &PathBuf,
+    project: &String,
+    mapped_repo: &HashMap<String, RepositoryItem>,
+) {
+    let mut root_repo_path = PathBuf::from(&root_path);
+    root_repo_path.push(project);
+    yarn_outdated_upgrade(&root_repo_path, &root_repo_path, 0);
+    recurse_packages(
+        &root_path,
+        &project,
+        &mapped_repo,
+        0,
+        &yarn_outdated_upgrade,
+    );
+}
+
+fn yarn_outdated_upgrade(_: &PathBuf, dep_repo_path: &PathBuf, level: usize) {
+    let path = dep_repo_path.display().to_string();
+    let message = format!("I'm in repo {}", path);
+    println!();
+    println!("{}", "#".repeat(message.len()));
+    println!("{}", message);
+    println!("{}", "-".repeat(message.len()));
+    yarn_install(&path);
+    let outdated = yarn_outdated(&path);
+    let root_value: serde_json::Value =
+        serde_json::from_str(&outdated).expect("json not formatted");
+    let data_value: &serde_json::Value = &root_value.as_object().expect("")["data"];
+    let body_value: &serde_json::Value = &data_value.as_object().expect("")["body"];
+    let packages: &Vec<serde_json::Value> = &body_value.as_array().expect("");
+    packages.iter().for_each(|p| {
+        let package = p.as_array().expect("");
+        let name = package[0].as_str().expect("");
+        let actual = package[1].as_str().expect("");
+        let wanted = package[2].as_str().expect("");
+        let latest = package[3].as_str().expect("");
+        println!();
+        if wanted > actual {
+            println!("Will upgrade {} from ^{} to ^{}", name, actual, wanted);
+            yarn_add(&path, &name.to_string(), &wanted.to_string());
+        } else {
+            println!("Will not upgrade {}", name);
+        }
+        if latest > wanted {
+            println!(
+                "- (!) {}@^{} has been replaced by new major ^{}",
+                name, wanted, latest
+            );
+        }
+    });
+}
+
+fn yarn_install(path: &String) {
+    println!("Installing dependencies...");
+    let output = Command::new("yarn")
+        .arg("install")
+        .arg("--frozen-lockfile")
+        .arg("--cwd")
+        .arg(&path.to_string())
+        .output()
+        .expect("error with yarn");
+}
+
+fn yarn_outdated(path: &String) -> String {
+    println!("Checking outdated dependencies...");
+    let output = Command::new("yarn")
+        .arg("outdated")
+        .arg("--json")
+        .arg("--cwd")
+        .arg(&path.to_string())
+        .output()
+        .expect("error with yarn");
+    let output_json: String = String::from_utf8(output.stdout).expect("error parsing output");
+    return output_json
+        .split('\n')
+        .skip(1)
+        .next()
+        .expect("cannot split")
+        .to_string();
+}
+
+fn yarn_add(path: &String, package: &String, version: &String) {
+    println!("Adding {}@^{}...", package, version);
+    let output = Command::new("yarn")
+        .arg("add")
+        .arg(format!("{}@^{}", package, version))
+        .arg("--cwd")
+        .arg(&path.to_string())
+        .output()
+        .expect("error with yarn");
+    if output.stderr.len() > 0 {
+        String::from_utf8(output.stderr).map(|s| {
+            println!("{}", s);
+        });
+    };
+    String::from_utf8(output.stdout).map(|s| {
+        println!("{}", s);
+    });
+}
+
 fn recurse_packages<F>(
     root_path: &PathBuf,
     project: &String,
@@ -160,7 +274,6 @@ fn recurse_packages<F>(
         let mut dep_path = PathBuf::from(&root_repo_path);
         dep_path.push(dep);
         dep_path.as_path().exists().then(|| {
-            println!("{}Processing {} dependency...", TAB.repeat(level), dep);
             mapped_repo.values().find(|ri| &ri.module == dep).map(|ri| {
                 // link nested dependencies
                 recurse_packages(&root_path, &ri.project, &mapped_repo, level + 1, function);
@@ -219,20 +332,4 @@ fn get_cross_dependencies(package: &serde_json::Value, modules: &Vec<String>) ->
         .filter(|d| modules.contains(d))
         .map(|d| d.strip())
         .collect();
-}
-
-trait StringExtension {
-    fn strip(self) -> String;
-}
-
-impl StringExtension for &String {
-    fn strip(self) -> String {
-        self.to_string().trim().replace("\"", "")
-    }
-}
-
-impl StringExtension for &serde_json::Value {
-    fn strip(self) -> String {
-        self.to_string().trim().replace("\"", "")
-    }
 }
