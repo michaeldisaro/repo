@@ -195,13 +195,13 @@ fn yarn_outdated_upgrade(_: &PathBuf, dep_repo_path: &PathBuf, level: usize) {
         let wanted = package[2].as_str().expect("");
         let latest = package[3].as_str().expect("");
         println!();
-        if wanted > actual {
+        if wanted.is_more_recent(actual) {
             println!("Will upgrade {} from ^{} to ^{}", name, actual, wanted);
             yarn_add(&path, &name.to_string(), &wanted.to_string());
         } else {
             println!("Will not upgrade {}", name);
         }
-        if latest > wanted {
+        if latest.is_more_recent(wanted) {
             println!(
                 "- (!) {}@^{} has been replaced by new major ^{}",
                 name, wanted, latest
