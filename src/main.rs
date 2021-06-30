@@ -4,10 +4,12 @@ pub mod traits;
 
 use models::structs::*;
 use services::actions::*;
+use services::n::*;
 use structopt::StructOpt;
 
 fn main() {
     let args = Params::from_args();
+    set_node_version(&args.node_version);
     match &args.action[..] {
         "link" => link(&args.project, &args.path),
         "copy" => copy(&args.project, &args.path),

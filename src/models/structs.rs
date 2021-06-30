@@ -14,6 +14,8 @@ fn parse_path(src: &str) -> Result<PathBuf, ParseError> {
 pub struct Params {
     pub action: String,
     pub project: String,
+    #[structopt(default_value = "")]
+    pub node_version: String,
     #[structopt(parse(try_from_str = parse_path),default_value=".")]
     pub path: PathBuf,
 }

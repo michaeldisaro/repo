@@ -11,13 +11,6 @@ use std::process::Command;
 pub trait MetarepoExtension {
     fn get_projects(self) -> Vec<String>;
     fn map(self) -> HashMap<String, RepositoryItem>;
-    fn recurse_projects<F>(
-        self,
-        project: &String,
-        mapped_repo: &HashMap<String, RepositoryItem>,
-        function: &F,
-    ) where
-        F: Fn(&PathBuf, &PathBuf);
     fn package_to_link(self, project: &String);
     fn link_to_package(self, project: &String);
     fn copy_packages(self, project: &String);
@@ -78,42 +71,6 @@ impl MetarepoExtension for &PathBuf {
         return repository;
     }
 
-    fn recurse_projects<F>(
-        self,
-        project: &String,
-        mapped_repository: &HashMap<String, RepositoryItem>,
-        function: &F,
-    ) where
-        F: Fn(&PathBuf, &PathBuf),
-    {
-        let mut root_repo_path = PathBuf::from(self);
-        root_repo_path.push(project);
-        root_repo_path.push(MODULES_FOLDER);
-        mapped_repository[project]
-            .dependencies
-            .iter()
-            .for_each(|dep| {
-                let mut dep_path = PathBuf::from(&root_repo_path);
-                dep_path.push(dep);
-                dep_path.as_path().exists().then(|| {
-                    mapped_repository
-                        .values()
-                        .find(|ri| &ri.module == dep)
-                        .map(|ri| {
-                            // link nested dependencies
-                            self.recurse_projects(&ri.project, &mapped_repository, function);
-                            // link root dependencies
-                            let mut dep_repo_path = PathBuf::from(self);
-                            dep_repo_path.push(&ri.project);
-                            dep_repo_path
-                                .as_path()
-                                .is_dir()
-                                .then(|| function(&dep_path, &dep_repo_path));
-                        });
-                });
-            });
-    }
-
     fn package_to_link(self, project: &String) {
         let mapped_repository = self.map();
         let link = |dep_path: &PathBuf, dep_repo_path: &PathBuf| {
@@ -126,7 +83,7 @@ impl MetarepoExtension for &PathBuf {
                 .expect("error renaming directory");
             unix::fs::symlink(&dep_repo_path, &dep_path).expect("error symlinking directory");
         };
-        self.recurse_projects(&project, &mapped_repository, &link);
+        recurse_projects(self, &project, &mapped_repository, &link);
     }
 
     fn link_to_package(self, project: &String) {
@@ -141,7 +98,7 @@ impl MetarepoExtension for &PathBuf {
             fs::rename(dep_path.display().to_string() + "_orig", &dep_path)
                 .expect("error renaming directory");
         };
-        self.recurse_projects(&project, &mapped_repository, &unlink);
+        recurse_projects(self, &project, &mapped_repository, &unlink);
     }
 
     fn copy_packages(self, project: &String) {
@@ -161,7 +118,7 @@ impl MetarepoExtension for &PathBuf {
                 .output()
                 .expect("error copying directory");
         };
-        self.recurse_projects(&project, &mapped_repository, &copy);
+        recurse_projects(self, &project, &mapped_repository, &copy);
     }
 
     fn update_dependencies(self, project: &String) {
@@ -169,11 +126,54 @@ impl MetarepoExtension for &PathBuf {
         let mut root_repo_path = PathBuf::from(self);
         root_repo_path.push(project);
         yarn_outdated_upgrade(&root_repo_path, &root_repo_path);
-        self.recurse_projects(&project, &mapped_repository, &yarn_outdated_upgrade);
+        recurse_projects(self, &project, &mapped_repository, &yarn_outdated_upgrade);
     }
 }
 
 const MODULES_FOLDER: &str = "node_modules";
+
+fn recurse_projects<F>(
+    root_path: &PathBuf,
+    project: &String,
+    mapped_repository: &HashMap<String, RepositoryItem>,
+    function: &F,
+) where
+    F: Fn(&PathBuf, &PathBuf),
+{
+    let mut root_project_path = PathBuf::from(root_path);
+    root_project_path.push(project);
+    let mut node_modules_path = PathBuf::from(&root_project_path);
+    node_modules_path.push(MODULES_FOLDER);
+    Command::new("rm")
+        .arg("-rf")
+        .arg(&node_modules_path)
+        .output()
+        .expect("error removing node_modules directory");
+    yarn_install(&root_project_path.display().to_string());
+    mapped_repository[project]
+        .dependencies
+        .iter()
+        .for_each(|dep| {
+            let mut dep_path = PathBuf::from(&node_modules_path);
+            dep_path.push(dep);
+            dep_path.as_path().exists().then(|| {
+                mapped_repository
+                    .values()
+                    .find(|ri| &ri.module == dep)
+                    .map(|ri| {
+                        // link nested dependencies
+                        recurse_projects(root_path, &ri.project, &mapped_repository, function);
+                        // link root dependencies
+                        let mut dep_repo_path = PathBuf::from(root_path);
+                        dep_repo_path.push(&ri.project);
+                        dep_repo_path
+                            .as_path()
+                            .is_dir()
+                            .then(|| function(&dep_path, &dep_repo_path));
+                    });
+            });
+        });
+}
 
 fn iterate_projects<I, P, F>(projects: &Vec<I>, predicate: P, f: F)
 where
