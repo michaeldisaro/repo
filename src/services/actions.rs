@@ -36,3 +36,21 @@ pub fn update(project: &String, root_path: &PathBuf) {
     println!("-------------------------------------------------\n");
     root_path.update_dependencies(project);
 }
+
+pub fn build(project: &String, root_path: &PathBuf) {
+    println!("\n-------------------------------------------------");
+    println!("Building project tree...");
+    println!("Path: {}", root_path.display().to_string());
+    println!("Project: {}", project);
+    println!("-------------------------------------------------\n");
+    root_path.build_tree(project);
+}
+
+pub fn clean(project: &String, root_path: &PathBuf) {
+    println!("\n-------------------------------------------------");
+    println!("Cleaning project tree...");
+    println!("Path: {}", root_path.display().to_string());
+    println!("Project: {}", project);
+    println!("-------------------------------------------------\n");
+    root_path.clean_tree(project);
+}

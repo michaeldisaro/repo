@@ -7,7 +7,7 @@ use services::actions::*;
 use services::n::*;
 use structopt::StructOpt;
 
-fn main() {
+pub fn main() {
     let args = Params::from_args();
     set_node_version(&args.node_version);
     match &args.action[..] {
@@ -15,6 +15,8 @@ fn main() {
         "copy" => copy(&args.project, &args.path),
         "unlink" => unlink(&args.project, &args.path),
         "update" => update(&args.project, &args.path),
+        "clean" => clean(&args.project, &args.path),
+        "build" => build(&args.project, &args.path),
         _ => println!("Command not found!"),
     }
 }
